@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Review Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .header {
+            margin-bottom: 2rem;
+        }
+        .loading-spinner {
+            margin: 2rem auto;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="app"></div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+        function App() {
+            const [file, setFile] = useState(null);
+            const [taskId, setTaskId] = useState(null);
+            const [fileName, setFileName] = useState('');
+            const [columns, setColumns] = useState([]);
+            const [selectedColumn, setSelectedColumn] = useState('');
+            const [taskStatus, setTaskStatus] = useState('');
+            const [error, setError] = useState('');
+            const [uploadInProgress, setUploadInProgress] = useState(false);
+            const [analysisInProgress, setAnalysisInProgress] = useState(false);
+            const [pollingInterval, setPollingInterval] = useState(null);
+
+            // Clean up polling on unmount
+            useEffect(() => {
+                return () => {
+                    if (pollingInterval) clearInterval(pollingInterval);
+                };
+            }, [pollingInterval]);
+
+            // Poll for task status
+            useEffect(() => {
+                if (taskId && taskStatus === 'processing') {
+                    const interval = setInterval(checkTaskStatus, 5000);
+                    setPollingInterval(interval);
+                    return () => clearInterval(interval);
+                }
+            }, [taskId, taskStatus]);
+
+            const handleFileChange = (e) => {
+                const selectedFile = e.target.files[0];
+                if (selectedFile) {
+                    // Check if file is an Excel file
+                    if (!selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
+                        setError('Please upload an Excel file (.xlsx or .xls)');
+                        return;
+                    }
+                    setFile(selectedFile);
+                    setFileName(selectedFile.name);
+                    setError('');
+                }
+            };
+
+            const handleUpload = async () => {
+                if (!file) {
+                    setError('Please select a file first');
+                    return;
+                }
+
+                setUploadInProgress(true);
+                setError('');
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/upload/`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Error uploading file');
+                    }
+
+                    const data = await response.json();
+                    setTaskId(data.task_id);
+                    setColumns(data.columns);
+                    setTaskStatus('pending');
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setUploadInProgress(false);
+                }
+            };
+
+            const handleColumnSelect = (e) => {
+                setSelectedColumn(e.target.value);
+            };
+
+            const handleAnalyze = async () => {
+                if (!selectedColumn) {
+                    setError('Please select a column containing reviews');
+                    return;
+                }
+
+                setAnalysisInProgress(true);
+                setError('');
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/analyze/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            task_id: taskId,
+                            review_column: selectedColumn,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Error starting analysis');
+                    }
+
+                    setTaskStatus('processing');
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setAnalysisInProgress(false);
+                }
+            };
+
+            const checkTaskStatus = async () => {
+                if (!taskId) return;
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`);
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Error checking task status');
+                    }
+
+                    const data = await response.json();
+                    setTaskStatus(data.status);
+
+                    if (data.status === 'failed' && data.error) {
+                        setError(`Analysis failed: ${data.error}`);
+                        if (pollingInterval) clearInterval(pollingInterval);
+                    }
+
+                    if (data.status === 'completed') {
+                        if (pollingInterval) clearInterval(pollingInterval);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                    if (pollingInterval) clearInterval(pollingInterval);
+                }
+            };
+
+            const handleDownload = async () => {
+                if (!taskId) return;
+
+                try {
+                    window.location.href = `${API_BASE_URL}/download/${taskId}`;
+                } catch (err) {
+                    setError(err.message);
+                }
+            };
+
+            const handleReset = () => {
+                setFile(null);
+                setTaskId(null);
+                setFileName('');
+                setColumns([]);
+                setSelectedColumn('');
+                setTaskStatus('');
+                setError('');
+                if (pollingInterval) clearInterval(pollingInterval);
+            };
+
+            // Render UI based on current state
+            const renderContent = () => {
+                if (!taskId) {
+                    return (
+                        <div className="card">
+                            <div className="card-body">
+                                <h5 className="card-title">Step 1: Upload Excel File</h5>
+                                <div className="mb-3">
+                                    <input type="file" className="form-control" onChange={handleFileChange} accept=".xlsx,.xls" />
+                                </div>
+                                {fileName && <p>Selected file: {fileName}</p>}
+                                <button 
+                                    className="btn btn-primary" 
+                                    onClick={handleUpload} 
+                                    disabled={!file || uploadInProgress}
+                                >
+                                    {uploadInProgress ? 'Uploading...' : 'Upload File'}
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (taskStatus === 'pending') {
+                    return (
+                        <div className="card">
+                            <div className="card-body">
+                                <h5 className="card-title">Step 2: Select Review Column</h5>
+                                <div className="mb-3">
+                                    <label className="form-label">Select the column containing restaurant reviews:</label>
+                                    <select className="form-select" value={selectedColumn} onChange={handleColumnSelect}>
+                                        <option value="">-- Select a column --</option>
+                                        {columns.map(col => (
+                                            <option key={col} value={col}>{col}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <button 
+                                    className="btn btn-primary" 
+                                    onClick={handleAnalyze} 
+                                    disabled={!selectedColumn || analysisInProgress}
+                                >
+                                    {analysisInProgress ? 'Starting Analysis...' : 'Analyze Reviews'}
+                                </button>
+                                <button className="btn btn-secondary ms-2" onClick={handleReset}>
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (taskStatus === 'processing') {
+                    return (
+                        <div className="card">
+                            <div className="card-body">
+                                <h5 className="card-title">Processing Reviews</h5>
+                                <div className="loading-spinner">
+                                    <div className="spinner-border text-primary" role="status">
+                                        <span className="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p className="mt-2">Analyzing reviews. This may take a few minutes depending on the number of reviews.</p>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (taskStatus === 'completed') {
+                    return (
+                        <div className="card">
+                            <div className="card-body">
+                                <h5 className="card-title">Analysis Complete!</h5>
+                                <p>Your restaurant reviews have been analyzed successfully.</p>
+                                <button className="btn btn-success" onClick={handleDownload}>
+                                    Download Results
+                                </button>
+                                <button className="btn btn-primary ms-2" onClick={handleReset}>
+                                    Analyze Another File
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (taskStatus === 'failed') {
+                    return (
+                        <div className="card">
+                            <div className="card-body">
+                                <h5 className="card-title">Analysis Failed</h5>
+                                <p className="text-danger">There was an error processing your file.</p>
+                                <button className="btn btn-primary" onClick={handleReset}>
+                                    Try Again
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            return (
+                <div>
+                    <div className="header text-center">
+                        <h1>Restaurant Review Analyzer</h1>
+                        <p className="lead">Upload an Excel file with restaurant reviews to get AI-powered summaries and satisfaction scores</p>
+                    </div>
+
+                    {error && (
+                        <div className="alert alert-danger mb-4" role="alert">
+                            {error}
+                        </div>
+                    )}
+
+                    {renderContent()}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('app'));
+    </script>
+</body>
+</html>

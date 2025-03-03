@@ -1,0 +1,27 @@
+apiVersion: 2019-12-01
+location: eastus
+name: restaurant-review-app
+properties:
+  containers:
+  - name: restaurant-review-app
+    properties:
+      image: ${ACR_NAME}.azurecr.io/restaurant-review-app:latest
+      resources:
+        requests:
+          cpu: 1.0
+          memoryInGB: 1.5
+      ports:
+      - port: 8000
+      environmentVariables:
+      - name: KEY_VAULT_URL
+        value: ${KEY_VAULT_URL}
+      - name: AZURE_OPENAI_DEPLOYMENT_NAME
+        value: ${AZURE_OPENAI_DEPLOYMENT_NAME}
+  osType: Linux
+  restartPolicy: Always
+  ipAddress:
+    type: Public
+    ports:
+    - port: 8000
+tags: {}
+type: Microsoft.ContainerInstance/containerGroups

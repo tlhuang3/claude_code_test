@@ -1,0 +1,12 @@
+{
+  "name": "restaurant-review-analyzer-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Restaurant Review Analyzer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
